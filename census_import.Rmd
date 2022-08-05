@@ -1,0 +1,149 @@
+---
+title: "geo_data"
+author: "Zach Stone"
+date: "2022-08-05"
+output: html_document
+---
+
+```{r}
+library(readxl)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+```
+
+# Clean census data
+```{r}
+xl_data = read_excel('nyc_decennialcensusdata_2010_2020_change.xlsx', sheet = "2010, 2020, and Change")
+```
+```{r}
+#The header is like a multiindex concatenated across the sections of the table
+header = xl_data[1:3,]
+header
+```
+
+```{r}
+# On the geography section, it is just the second level which contains column names
+header[,1:8]
+```
+
+```{r}
+#Get column names from second level of header
+names(xl_data) = as.character(xl_data[3,])
+xl_data
+
+#Slice data
+xl_data = xl_data[4:nrow(xl_data),]
+xl_data = xl_data %>% rename(index = `Orig Order`) %>% mutate(index = as.numeric(index))
+
+xl_data
+```
+
+```{r}
+#The data can be broken into analysis from different surveys
+xl_data %>%
+  select(GeoType) %>%
+  table()
+```
+
+```{r}
+#Filter the census data
+census = xl_data %>%
+  filter(GeoType == 'CT2020')
+
+#Name, CD Type, NTA Type are not used in this data
+colSums(is.na(census)) == nrow(census)
+
+census = census %>%
+  select(-(6:8))
+```
+
+GeoID is 11 characters, which means it is a census tract ID. Split into:
+-     state_gid (2 digit state GeoID)
+-     county_gid (3 digit county GeoID)
+-     tract_gid (6 digit census tract GeoID)
+
+```{r}
+census = census %>%
+  mutate(StateGID = substring(GeoID, 1,2),
+         CountyGID = substring(GeoID, 3,5),
+         TractGID = substring(GeoID, 6,11))
+```
+
+Clearly the StateGID is unique
+
+```{r}
+unique(census$StateGID)
+```
+
+And counties correspond to Borough
+
+```{r}
+census %>%
+  group_by(Borough, CountyGID) %>%
+  summarize(tracts = n())
+```
+
+In all cases, redundant tract gid's are in distinct burroughs. 
+So, sufficient to keep  Borough and tract_id from the Geography section
+
+```{r}
+has_dup = census %>%
+  select(TractGID) %>%
+  table() > 1
+
+duplicates <- names(has_dup[has_dup])
+
+census %>%
+  filter(TractGID == duplicates[400])
+```
+```{r}
+census = census %>%
+  select(-c('GeoType', 'GeoID', 'BCT2020', 'StateGID', 'CountyGID'))
+```
+
+Split into dataframes for 2010, 2020, and Change
+```{r}
+census2010 = census %>%
+  select(index, Borough, TractGID, ends_with('_10'))
+
+census2020 = census %>%
+  select(index, Borough, TractGID, ends_with('_20'))
+
+census_ch = census %>%
+  select(index, Borough, TractGID, ends_with('_Ch'))
+```
+
+
+```{r}
+#Convert to numeric
+census2020[,4:ncol(census2020)] = data.frame(sapply(census2020[,4:ncol(census2020)], as.numeric))
+census2020$TractGID = as.numeric(census2020$TractGID)
+```
+
+```{r}
+census2020
+```
+
+# Import GeoJSON file
+
+```{r}
+library(rjson)
+library(geojsonio)
+library(sp)
+```
+
+
+```{r}
+spdf <- geojson_read('census2020.json', what = 'sp')
+```
+
+```{r}
+plot(spdf)
+```
+```{r}
+spdf
+```
+
+
+
