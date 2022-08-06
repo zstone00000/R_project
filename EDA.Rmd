@@ -1,0 +1,84 @@
+---
+title: "EDA"
+author: "Zach Stone"
+date: "2022-08-06"
+output: html_document
+---
+
+# Setup and imports
+
+```{r, setup, include=FALSE}
+knitr::opts_knit$set(root.dir = '/Users/zachstone/Documents/coursework/NYCDSA/R_project')
+```
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(rjson)
+library(geojsonio)
+library(sp)
+```
+
+
+
+# Get census data
+
+```{r}
+source("./census_import.R") 
+census_path = 'data/nyc_decennialcensusdata_2010_2020_change.xlsx'
+census_list = parse_census2020(census_path)
+```
+
+```{r}
+names(census_list)
+census2010 = census_list[['_10']]
+census2020 = census_list[['_20']]
+census_ch = census_list[['_Ch']]
+```
+
+
+
+# Make zip table and attach to census
+
+```{r}
+source("./make_ziptable.R") 
+zip_table = make_ziptable('data/TRACT_ZIP_122020.xlsx')
+```
+
+```{r}
+#still has many missing zip codes due to imperfect location encoding by zip code
+census2020 = census2020 %>%
+  left_join(zip_table, by = c("GeoID" = "tract")) %>%
+  select(c(1:4,ncol(census2020)+1,5:ncol(census2020))) 
+```
+
+
+
+# Get GeoJSON data and merge with census data
+
+```{r}
+tract_spdf_data = geojson_read('data/census2020.json', what = 'sp')
+tract_spdf = tract_spdf_data
+```
+
+```{r}
+census2020.spdf = merge(tract_spdf, census2020, by.x = 'GEOID', by.y = 'GeoID')
+```
+
+
+
+# Import healthcare data
+
+```{r}
+source('med_import.R') 
+med = import_chronic('data/Medicaid_Chronic_Conditions__Inpatient_Admissions_and_Emergency_Room_Visits_by_Zip_Code__Beginning_2012.csv')
+
+medtotals = import_totals('data/Medicaid_Beneficiaries__Inpatient_Admissions_and_Emergency_Room_Visits_by_Zip_Code__Beginning_2012.csv')
+```
+
+
+
+
+
+
