@@ -231,6 +231,91 @@ census2020 %>%
 
 census2020
 ```
+
+## Testing plotting aggregate geographic data
+
+```{r}
+census2020
+spdf_zip@data
+zip_table
+```
+
+
+```{r}
+library(rgeos)
+```
+
+```{r}
+sp_zip = gUnaryUnion(spdf_zip, id = spdf_zip$zip)
+```
+
+```{r}
+pop_zip = census2020 %>%
+  inner_join(zip_table, by = c('GeoID' = 'tract')) %>%
+  group_by(zip) %>%
+  summarize(pop = sum(Pop_20))
+
+row.names(pop_zip) = c(pop_zip$zip)
+
+spdf_zipped = SpatialPolygonsDataFrame(sp_zip, pop_zip, proj4string = CRS('+proj=longlat +datum=WGS84 +no_defs'))
+```
+
+
+
+```{r}
+spplot(spdf_zipped, zcol = 'pop')
+```
+### Final check using area
+
+```{r}
+zip_area = spdf_zip@data %>%
+  group_by(zip) %>%
+  summarize(area = sum(Shape__Area))
+
+row.names(zip_area) = zip_area$zip
+
+spdf_ziparea = SpatialPolygonsDataFrame(sp_zip, zip_area)
+```
+
+```{r}
+#Sure looks like it plotted sums of census tract areas
+spplot(spdf_ziparea, zcol = 'area')
+```
+
+## Checking adding points and matching coordinates
+
+```{r}
+crs(spdf)
+```
+
+
+```{r}
+cents = getSpPPolygonsLabptSlots(spdf_zipped)
+spdf_cent = SpatialPointsDataFrame(coords=cents, data=spdf_zipped@data, proj4string=CRS('+proj=longlat +datum=WGS84 +no_defs'))
+```
+
+```{r}
+plot(spdf_zipped)
+points(spdf_cent, pch = 3, col = "Red")
+```
+
+```{r}
+plot(spdf_cent)
+plot(spdf_zipped)
+```
+
+```{r}
+gArea(spgeom = spdf_zipped)
+```
+ 
+ 
+```{r}
+SpatialPointsDataFrame(coords=cents, data=sids@data, proj4string=CRS("+proj=longlat +ellps=clrk66"))
+```
+
+
+
+
 # Medical data (by conditions)
 
 ```{r}
