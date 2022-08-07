@@ -18,11 +18,12 @@ library(ggplot2)
 library(rjson)
 library(geojsonio)
 library(sp)
+library(rgeos)
 ```
 
 
 
-# Get census data
+## Get census data
 
 ```{r}
 source("./census_import.R") 
@@ -39,7 +40,7 @@ census_ch = census_list[['_Ch']]
 
 
 
-# Make zip table and attach to census
+## Make zip table and attach to census
 
 ```{r}
 source("./make_ziptable.R") 
@@ -53,22 +54,26 @@ census2020 = census2020 %>%
   select(c(1:4,ncol(census2020)+1,5:ncol(census2020))) 
 ```
 
+```{r}
+#GeoJoinIDs for air quality measurements
+geojoin.zip.conversion = read.csv('data/UHF_zip_conversion.csv')
+```
 
 
-# Get GeoJSON data and merge with census data
+## Get GeoJSON data and merge with census data
 
 ```{r}
 tract_spdf_data = geojson_read('data/census2020.json', what = 'sp')
-tract_spdf = tract_spdf_data
+tract.spdf = tract_spdf_data
 ```
 
 ```{r}
-census2020.spdf = merge(tract_spdf, census2020, by.x = 'GEOID', by.y = 'GeoID')
+census2020.spdf = merge(tract.spdf, census2020, by.x = 'GEOID', by.y = 'GeoID')
 ```
 
 
 
-# Import healthcare data
+## Import healthcare data
 
 ```{r}
 source('med_import.R') 
@@ -77,6 +82,413 @@ med = import_chronic('data/Medicaid_Chronic_Conditions__Inpatient_Admissions_and
 medtotals = import_totals('data/Medicaid_Beneficiaries__Inpatient_Admissions_and_Emergency_Room_Visits_by_Zip_Code__Beginning_2012.csv')
 ```
 
+```{r}
+#med df is separated out by dual and non-dual eligibility
+#sum over these for each location and disease
+med.zip = med %>%
+  group_by(Year, Zip.Code, Boro, Major.Diagnostic.Category, Episode.Disease.Category) %>%
+   summarize(across(where(is.numeric), ~ sum(.x))) %>% ungroup
+```
+
+## Import tobacco data
+
+```{r}
+source('tobaccostore_import.R')
+tobac_data = import_tobac('data/Active_Tobacco_Retail_Dealer_Licenses.csv')
+tobac = tobac_data
+```
+
+## Import air data
+
+```{r}
+#Contains data for 19 different measures
+air_data = read.csv('data/Air_Quality.csv')
+air = air_data
+```
+
+# EDA
+
+## Asthma and location
+### Look at asthma hospitalization rates by zip
+
+```{r}
+med.asthma = med.zip %>%
+  filter(Episode.Disease.Category == 'Asthma') %>% #Filter asthma
+  select(year = Year, zip = Zip.Code, boro = Boro, 
+         n_ben = Beneficiaries.with.Condition, unique_admit = Beneficiaries.with.Admissions, 
+         total_admit = Total.Inpatient.Admissions, unique_er = Beneficiaries.with.ER.Visits,
+         total_er = Total.ER.Visits) %>% #subset and rename columns
+  inner_join(medtotals %>% select(year = Year, zip = Zip.Code, boro = Boro, ben_total = Total.Beneficiaries),
+             by = c('year', 'zip', 'boro')) %>% #merge total benficiaries by zip
+  select(c(1:3, ncol(.), 4:ncol(.)-1)) #arrange columns
+```
+
+```{r}
+asthma.rate.byzip2014 = med.asthma %>%
+  filter(year == 2014) %>%
+  transmute(zip, boro, asthma_rate = n_ben/ben_total)
+```
+
+
+Merge with spdf
+```{r}
+#Prep df rows
+row.names(asthma.rate.byzip2014) = asthma.rate.byzip2014$zip
+```
+
+```{r}
+grouped.sp = gUnaryUnion(census2020.spdf, id = census2020.spdf$zip)
+grouped.df = data.frame(zip = row.names(grouped.sp), row.names = row.names(grouped.sp))
+zip.spdf = SpatialPolygonsDataFrame(grouped.sp, grouped.df)
+```
+
+```{r}
+asthma.rate.byzip2014.spdf = merge(zip.spdf, asthma.rate.byzip2014, by = 'zip')
+```
+
+
+```{r}
+spplot(asthma.rate.byzip2014.spdf, zcol = 'asthma_rate')
+```
+```{r}
+#Remove zips with no data
+zipcode = asthma.rate.byzip2014.spdf
+zipcode = zipcode[,c('zip', 'asthma_rate')]
+zipcode = zipcode[complete.cases(zipcode@data),]
+
+# Set IDs
+zipcode@data$id <- rownames(zipcode@data)
+# fortify zip
+zipcodedata <- fortify(zipcode, region = "id")
+# merge rotified data with the data from spdf
+zipcodedf <- merge(zipcodedata, zipcode@data,
+                           by = "id")
+```
+
+```{r}
+p0 <- ggplot(data = zipcodedf, aes(x = long, y = lat, group = group, fill = asthma_rate)) +
+geom_polygon() +
+geom_path(color = "white", size = 0.2) +
+coord_equal() +
+theme(panel.background=element_blank())+
+theme(panel.background= element_rect(color="black")) +
+scale_fill_continuous(type = "viridis") +
+theme(axis.title = element_blank(), axis.text = element_blank()) +
+labs(title = "Rate of Medicare/Medicaid Benficiaries with Asthma by Zip")
+print(p0)
+
+# ggsave(plot = p0, 'asthmarate_byzip.png', device = 'png', dpi = 320, scale = 2)
+```
+Some of the findings about Mott Haven are confirmed, showing higher asthma rates. Though, it looks like it is higher throughout the whole area. Interestingly, this pattern seems to hold throughout the map. There are not isolated 'hotspots', but rather entire areas which are gradiently heightened.
+
+Another strip which looks elevated, though not by nearly as much, is throughout Crown Heights - Bed Stuy - Bushwick - Ridgewood area, along with some of the Rockaways.
+
+### First run chi2 to show that location impacts asthma rate
+
+```{r}
+#Create asthma by zip contingency table
+asthma.zip.contingency.df = med.asthma %>%
+  filter(year == 2014) %>%
+  transmute(zip, yes = n_ben, no = ben_total - n_ben) 
+
+asthma.zip.table = cbind(asthma.zip.contingency.df$yes, asthma.zip.contingency.df$no)
+rownames(asthma.zip.table) = asthma.zip.contingency.df$zip
+colnames(asthma.zip.table) = c('yes', 'no')
+```
+
+```{r}
+#Chi squared with p<0.05
+chisq.test(asthma.zip.table) 
+```
+
+Extremely likely that asthma rate is not independent of location.
+
+### Run binomial tests to see which areas are significantly over citywide average rates
+
+```{r}
+#Citywide
+med.asthma %>%
+  filter(year == 2014) %>%
+  summarize(pop = sum(ben_total), asthma_rate = sum(n_ben)/sum(ben_total))
+
+asthma.rate.city = summarize(med.asthma,sum(n_ben)/sum(ben_total))[[1,1]]
+```
+
+```{r}
+asthma.zip.counts = med.asthma %>%
+  filter(year == 2014) %>%
+  transmute(zip, ben_total, ben_asthma = n_ben, asthma_rate = n_ben/ben_total) %>%
+  arrange(desc(asthma_rate))
+```
+
+Binomial test for single zip code
+```{r}
+binom.test(1188, 9287, p = asthma.rate.city, alternative = "greater")$p.value
+```
+
+```{r}
+
+asthma.zip.rates = asthma.zip.counts %>%
+  mutate(greater_citywide_pval = unlist(mapply(binom.test, asthma.zip.counts$ben_asthma, asthma.zip.counts$ben_total,
+       p = rep(asthma.rate.city, nrow(asthma.zip.counts)),
+       alternative= "greater")[3,]))
+
+#About 30% of zip codes are identified as significantly higher than citywide asthma rate
+asthma.zip.rates %>%
+  filter(greater_citywide_pval <= 0.05)
+
+med %>%
+  select(Zip.Code) %>%
+  unique() %>%
+  summarize(n())
+```
+
+### Plot regions with significantly higher asthma rates
+
+```{r}
+asthma.zip.rates = asthma.zip.rates %>%
+  mutate(sign_greater = greater_citywide_pval <= 0.05)
+```
+
+```{r}
+asthma.zip.rates
+```
+
+```{r}
+#Prep df rows
+row.names(asthma.zip.rates) = asthma.zip.rates$zip
+asthma.greater.spdf = merge(zip.spdf, asthma.zip.rates, by = 'zip')
+```
+
+```{r}
+#Remove zips with no data
+zipcode = asthma.greater.spdf
+zipcode = zipcode[complete.cases(zipcode@data),]
+
+# Set IDs
+zipcode@data$id <- rownames(zipcode@data)
+# fortify zip
+zipcodedata <- fortify(zipcode, region = "id")
+# merge rotified data with the data from spdf
+zipcodedf <- merge(zipcodedata, zipcode@data,
+                           by = "id")
+```
+
+```{r}
+p1 <- ggplot(data = zipcodedf, aes(x = long, y = lat, group = group, fill = !sign_greater)) +
+geom_polygon() +
+geom_path(color = "white", size = 0.2) +
+coord_equal() +
+theme(panel.background=element_blank())+
+theme(panel.background= element_rect(color="black")) +
+theme(axis.title = element_blank(), axis.text = element_blank()) +
+labs(title = "Areas with significantly higher asthma rate than citywide average")
+print(p1)
+```
+
+Interestingly, the areas are mostly contiguous, indicating subdivisions into the map of larger high and low risk areas.
+
+
+## Tobacco 
+
+### Plot tobacco locations
+
+```{r}
+tobac.sp = SpatialPoints(tobac %>% select(long,lat) %>% filter(!is.na(long) & !is.na(lat))
+                         , proj4string = CRS('+proj=longlat +datum=WGS84 +no_defs'))
+```
+
+```{r}
+plot(tract.spdf)
+points(tobac.sp, col = 'red', pch = 3)
+```
+
+Far too much to be visible. Three ideas of different complexity:
+-   Group by zip, and look at number per zip (simplest, coursest)
+-   Two geometric methods:
+  -   Pointwise, look at number within a certain range, and compare to pointwise asthma estimate for that range
+  -   Same as above, but weighting by distance
+  -   To find pointwise asthma estimate, should take a region around point. Suppose it intersects with Zips Z1, ... , Zn. Then to find the proportion for that block, find for each Zi, (area of interseciton with Zi)/(area of Zi) * total_ben to find approximate ben in that intersection. Then, do the same but times * n_ben_asthma. Then sum all of the n_ben_asthmas and divide by sum of total_bens
+
+Start with simplest: counts by zip
+
+```{r}
+tobac.zip = tobac %>%
+  group_by(zip) %>%
+  summarize(store_count = n())
+```
+
+
+```{r}
+tobac.zip.spdf = merge(zip.spdf,tobac.zip, by = 'zip')
+```
+
+```{r}
+spplot(tobac.zip.spdf, zcol = 'store_count')
+```
+This is clearly a bad method because zips are largely different in size. Could do per capita or per benficiary.
+
+```{r}
+#Create population by zip
+pop.zip = census2020 %>%
+  filter(!is.na(zip)) %>%
+  group_by(zip) %>%
+  summarize(pop = sum(Pop_20))
+
+tob_percap.zip = inner_join(tobac.zip,pop.zip, by = 'zip') %>%
+  mutate(tobac_percap = store_count/pop)
+```
+
+
+```{r}
+#extreme outliers due to low population in certain zips. These are:
+# JFK 11430
+#Pelham bay park 10464
+# Parts of the roackaways 11697
+# tob_percap.zip %>%
+#   arrange(desc(tobac_percap))
+
+#artificially low pop as well, remove from dataset
+# tob_percap.zip %>%
+#   arrange(pop)
+
+tob_percap.zip = tob_percap.zip %>%
+  filter(!(zip %in% c(11430, 10464, 11697)))
+```
+
+
+```{r}
+#Still lots of irregularities, so should normalize
+# spplot(tob_percap.zip.spdf, zcol = 'tobac_percap')
+```
+
+```{r}
+#log somewhat better
+ggplot(tob_percap.zip, aes(x = tobac_percap)) +
+  geom_histogram(bins = 50) +
+  scale_x_log10()
+```
+
+```{r}
+tob_percap.zip = tob_percap.zip %>%
+  mutate(log_percap = log(tobac_percap))
+```
+
+
+```{r}
+#Create spdf
+tob_percap.zip.spdf = merge(zip.spdf, tob_percap.zip, by = 'zip')
+```
+
+```{r}
+spplot(tob_percap.zip.spdf, zcol = 'log_percap')
+```
+Somewhat better. This is a very rough metric, starting with the geographic divisions, and the indirect link between stores and actual smokers, esp indoors and/or w children, like the original study. Somewhat elevated in the CH region, but doesn't look significnatly elevated in the bronx region.
+
+```{r}
+#Remove zips with no data
+zipcode = tob_percap.zip.spdf
+zipcode = zipcode[complete.cases(zipcode@data),]
+
+# Set IDs
+zipcode@data$id <- rownames(zipcode@data)
+# fortify zip
+zipcodedata <- fortify(zipcode, region = "id")
+# merge rotified data with the data from spdf
+zipcodedf <- merge(zipcodedata, zipcode@data,
+                           by = "id")
+```
+
+```{r}
+p2 <- ggplot(data = zipcodedf, aes(x = long, y = lat, group = group, fill = log_percap)) +
+geom_polygon() +
+geom_path(color = "white", size = 0.2) +
+coord_equal() +
+theme(panel.background=element_blank())+
+theme(panel.background= element_rect(color="black")) +
+theme(axis.title = element_blank(), axis.text = element_blank()) +
+scale_fill_continuous(type = "viridis") +
+labs(title = "Tobacco Stores Per Capita by Zip")
+print(p2)
+```
+
+There doesn't seem to be a strong correlation, we can check:
+
+```{r}
+rate.vs.tob_percap.zip = asthma.zip.rates %>%
+  inner_join(tob_percap.zip, by = 'zip') %>%
+  select(zip, asthma_rate, log_percap)
+
+ggplot(rate.vs.tob_percap.zip, aes(x = asthma_rate, y = log_percap)) +
+  geom_point()
+
+#low correlation
+cor(rate.vs.tob_percap.zip$asthma_rate, rate.vs.tob_percap.zip$log_percap)
+```
+
+## Air quality
+
+Air quality data is only on UHF Neighborhood codes. First have to create map with UHF boundaries. Column containing the coes is called "Geo.Join.ID".
+
+### Setup UHF42 code map 
+
+```{r} 
+#Create spdf merged over Geo.Join.ID with one col corresponding to ID
+geojoin.spdf = merge(zip.spdf,geojoin.zip.conversion, by = 'zip')
+geo.grouped.sp = gUnaryUnion(geojoin.spdf, id = geojoin.spdf$Geo.Join.ID)
+df = data.frame(Geo.Join.ID = row.names(geo.grouped.sp), row.names = row.names(geo.grouped.sp))
+uhf.spdf = SpatialPolygonsDataFrame(geo.grouped.sp, df)
+```
+
+### Air data 1: O3 Hosp Rate by UHF
+
+```{r}
+#Start with a simple measure - O3-Attributable Asthma Hospitalizations (ozone)
+#3 different time periods covered. Let's look at 2012-2014 since this is closest to hospital records
+air %>%
+  filter(Name == 'O3-Attributable Asthma Hospitalizations') %>%
+  group_by(Time.Period) %>%
+  summarize(n())
+
+#Two different groups to separate out; 0-17 yrs and 18+
+air %>%
+  filter(Name == 'O3-Attributable Asthma Hospitalizations', Time.Period == '2012-2014') %>%
+  group_by(Measure) %>%
+  summarize(n())
+
+#Get dataframes with O3 asthma hospitalization rate for each age group
+ozone.hosp.1214.child
+ozone.hosp.1214.child = air %>%
+  filter(Name == 'O3-Attributable Asthma Hospitalizations', Time.Period == '2012-2014', Measure == 'Estimated Annual Rate- Children 0 to 17 Yrs Old', Geo.Type.Name == 'UHF42') %>%
+  select(id = Unique.ID, Geo.Join.ID, Data.Value)
+
+ozone.hosp.1214.adult = air %>%
+  filter(Name == 'O3-Attributable Asthma Hospitalizations', Time.Period == '2012-2014', Measure == 'Estimated Annual Rate- 18 Yrs and Older', Geo.Type.Name == 'UHF42') %>%
+  select(id = Unique.ID, Geo.Join.ID, Data.Value)
+
+
+ozone.hosp.1214.citywide = air %>%
+  filter(Name == 'O3-Attributable Asthma Hospitalizations', Time.Period == '2012-2014', Geo.Type.Name == 'Citywide') 
+```
+
+```{r}
+#Merge data into spdf
+ozone.hosp.1214.child.spdf = merge(uhf.spdf, ozone.hosp.1214.child)
+ozone.hosp.1214.adult.spdf = merge(uhf.spdf, ozone.hosp.1214.adult)
+```
+
+```{r}
+#Agrees with hospital data for higher in Harlem/South Bronx area and CH/Ridgewood area
+#O3 attributable asthma hospitalization per 100k
+spplot(ozone.hosp.1214.child.spdf, zcol = 'Data.Value')
+spplot(ozone.hosp.1214.adult.spdf, zcol = 'Data.Value')
+```
+
+### Look into O3 air quality
+
+```{r}
+
+```
 
 
 
