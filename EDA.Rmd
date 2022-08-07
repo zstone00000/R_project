@@ -21,6 +21,11 @@ library(sp)
 library(rgeos)
 ```
 
+```{r}
+source("./make_ziptable.R") 
+source("./make_fort.R")
+```
+
 
 
 ## Get census data
@@ -43,7 +48,6 @@ census_ch = census_list[['_Ch']]
 ## Make zip table and attach to census
 
 ```{r}
-source("./make_ziptable.R") 
 zip_table = make_ziptable('data/TRACT_ZIP_122020.xlsx')
 ```
 
@@ -60,7 +64,7 @@ geojoin.zip.conversion = read.csv('data/UHF_zip_conversion.csv')
 ```
 
 
-## Get GeoJSON data and merge with census data
+## Get census GeoJSON data and merge with census data
 
 ```{r}
 tract_spdf_data = geojson_read('data/census2020.json', what = 'sp')
@@ -71,7 +75,12 @@ tract.spdf = tract_spdf_data
 census2020.spdf = merge(tract.spdf, census2020, by.x = 'GEOID', by.y = 'GeoID')
 ```
 
+## Get zoning GeoJSON data
 
+```{r}
+nyzd_data = geojson_read('data/nyzd.json', what = 'sp')
+nyzd.spdf = nyzd_data
+```
 
 ## Import healthcare data
 
@@ -107,6 +116,13 @@ air = air_data
 ```
 
 # EDA
+
+## XXX Add EDA from preventable hospitalizations to indicate importance
+
+```{r}
+#XXX
+```
+
 
 ## Asthma and location
 ### Look at asthma hospitalization rates by zip
@@ -148,25 +164,15 @@ asthma.rate.byzip2014.spdf = merge(zip.spdf, asthma.rate.byzip2014, by = 'zip')
 
 
 ```{r}
-spplot(asthma.rate.byzip2014.spdf, zcol = 'asthma_rate')
-```
-```{r}
-#Remove zips with no data
-zipcode = asthma.rate.byzip2014.spdf
-zipcode = zipcode[,c('zip', 'asthma_rate')]
-zipcode = zipcode[complete.cases(zipcode@data),]
-
-# Set IDs
-zipcode@data$id <- rownames(zipcode@data)
-# fortify zip
-zipcodedata <- fortify(zipcode, region = "id")
-# merge rotified data with the data from spdf
-zipcodedf <- merge(zipcodedata, zipcode@data,
-                           by = "id")
+# spplot(asthma.rate.byzip2014.spdf, zcol = 'asthma_rate')
 ```
 
 ```{r}
-p0 <- ggplot(data = zipcodedf, aes(x = long, y = lat, group = group, fill = asthma_rate)) +
+asthma.rate.byzip2014.fort = make.fort(asthma.rate.byzip2014.spdf)
+```
+
+```{r}
+p0 <- ggplot(data = asthma.rate.byzip2014.fort, aes(x = long, y = lat, group = group, fill = asthma_rate)) +
 geom_polygon() +
 geom_path(color = "white", size = 0.2) +
 coord_equal() +
@@ -261,32 +267,39 @@ asthma.greater.spdf = merge(zip.spdf, asthma.zip.rates, by = 'zip')
 ```
 
 ```{r}
-#Remove zips with no data
-zipcode = asthma.greater.spdf
-zipcode = zipcode[complete.cases(zipcode@data),]
-
-# Set IDs
-zipcode@data$id <- rownames(zipcode@data)
-# fortify zip
-zipcodedata <- fortify(zipcode, region = "id")
-# merge rotified data with the data from spdf
-zipcodedf <- merge(zipcodedata, zipcode@data,
-                           by = "id")
+asthma.greater.fort = make.fort(asthma.greater.spdf)
 ```
 
 ```{r}
-p1 <- ggplot(data = zipcodedf, aes(x = long, y = lat, group = group, fill = !sign_greater)) +
+p1 <- ggplot(data = asthma.greater.fort, aes(x = long, y = lat, group = group, fill = !sign_greater)) +
+   scale_fill_manual(labels = c("True", "False"), values = c("#EA4969", "#56BFFB")) + 
 geom_polygon() +
 geom_path(color = "white", size = 0.2) +
 coord_equal() +
 theme(panel.background=element_blank())+
 theme(panel.background= element_rect(color="black")) +
 theme(axis.title = element_blank(), axis.text = element_blank()) +
-labs(title = "Areas with significantly higher asthma rate than citywide average")
+labs(title = "Areas with significantly higher asthma rate than citywide average",
+     fill = 'Asthma Rates \n significantly higher\n than city average')
 print(p1)
 ```
 
 Interestingly, the areas are mostly contiguous, indicating subdivisions into the map of larger high and low risk areas.
+
+Check the Rockaways, Staten Island, and Coney Island for low population.
+
+```{r}
+rock = c(11697, 11694, 11693, 11692)
+coney = c(11224)
+si.indust = c(10311)
+staten = c(10303, 10302, 10310, 10301, 10314)
+
+#Rockaway numbers are somewhat lower, but still in thousands
+asthma.zip.rates %>%
+  filter(zip %in% c(rock,coney,si.indust, staten))
+
+```
+
 
 
 ## Tobacco 
@@ -381,28 +394,21 @@ tob_percap.zip.spdf = merge(zip.spdf, tob_percap.zip, by = 'zip')
 ```
 
 ```{r}
-spplot(tob_percap.zip.spdf, zcol = 'log_percap')
+# spplot(tob_percap.zip.spdf, zcol = 'log_percap')
 ```
+
 Somewhat better. This is a very rough metric, starting with the geographic divisions, and the indirect link between stores and actual smokers, esp indoors and/or w children, like the original study. Somewhat elevated in the CH region, but doesn't look significnatly elevated in the bronx region.
 
 ```{r}
-#Remove zips with no data
-zipcode = tob_percap.zip.spdf
-zipcode = zipcode[complete.cases(zipcode@data),]
-
-# Set IDs
-zipcode@data$id <- rownames(zipcode@data)
-# fortify zip
-zipcodedata <- fortify(zipcode, region = "id")
-# merge rotified data with the data from spdf
-zipcodedf <- merge(zipcodedata, zipcode@data,
-                           by = "id")
+tob_percap.zip.fort = make.fort(tob_percap.zip.spdf)
 ```
 
 ```{r}
-p2 <- ggplot(data = zipcodedf, aes(x = long, y = lat, group = group, fill = log_percap)) +
-geom_polygon() +
-geom_path(color = "white", size = 0.2) +
+p2 <- ggplot() +
+geom_polygon(data = tob_percap.zip.fort, aes(x = long, y = lat, group = group, fill = log_percap)) +
+geom_path(data = tob_percap.zip.fort, 
+          aes(x = long, y = lat, group = group, fill = log_percap), 
+          color = "white", size = 0.2) +
 coord_equal() +
 theme(panel.background=element_blank())+
 theme(panel.background= element_rect(color="black")) +
@@ -457,7 +463,6 @@ air %>%
   summarize(n())
 
 #Get dataframes with O3 asthma hospitalization rate for each age group
-ozone.hosp.1214.child
 ozone.hosp.1214.child = air %>%
   filter(Name == 'O3-Attributable Asthma Hospitalizations', Time.Period == '2012-2014', Measure == 'Estimated Annual Rate- Children 0 to 17 Yrs Old', Geo.Type.Name == 'UHF42') %>%
   select(id = Unique.ID, Geo.Join.ID, Data.Value)
@@ -487,10 +492,231 @@ spplot(ozone.hosp.1214.adult.spdf, zcol = 'Data.Value')
 ### Look into O3 air quality
 
 ```{r}
+# Over a wide range of times. May want to subset 2012-2014 and aggregate, since that's the time period near hospitalizations
+air %>%
+  filter(Name == 'Ozone (O3)') %>%
+  group_by(Time.Period) %>%
+  summarize(n())
 
+#Average over value from each summer between 2012-2014 on neighborhood data
+O3.1214 = air %>%
+  filter(Name == 'Ozone (O3)', Geo.Type.Name == 'UHF42',
+         Time.Period %in% c('Summer 2012', 'Summer 2013', 'Summer 2014' )) %>%
+  group_by(Geo.Join.ID) %>%
+  summarize(Name = first(Name), Measure = first(Measure), Measure.Info = first(Measure.Info),
+            avg.ppb = mean(Data.Value))
+```
+
+```{r}
+O3.1214.spdf = merge(uhf.spdf, O3.1214)
+```
+
+```{r}
+spplot(O3.1214.spdf, zcol = 'avg.ppb')
+```
+
+We can see some elevated regions, but not clear if significantly different or correlated to hospitalization rates, even O3 attributable ones. Of the major hotspots: mildly higher in Bronx, Very High for Rockaways, actually lower for Staten Island and Lower Manhattan, and average for CH/Ridgewood.
+
+```{r}
+#One outlier above and 3 below
+O3.1214 %>%
+  ggplot(data = ., aes(x = avg.ppb)) +
+  geom_density()
+
+#Low end looks on par with other neighborhoods
+O3.1214 %>%
+  arrange(avg.ppb)
+
+#Region 410 significantly higher
+O3.1214 %>%
+  arrange(desc(avg.ppb))
+
+#Quartiles
+quantile(O3.1214$avg.ppb)
+```
+
+```{r}
+data.frame(O3.ppb = O3.1214$avg.ppb, O3.hosp.adult = ozone.hosp.1214.adult$Data.Value) %>%
+  ggplot(data = ., aes(x = O3.ppb, y = O3.hosp.adult)) +
+    geom_point() +
+    geom_vline(xintercept = 30.15917, color = 'red', linetype ='dashed') +
+    geom_vline(xintercept = 31.58833, color = 'blue', linetype ='dashed') +
+    geom_vline(xintercept = 32.50333, color = 'red', linetype ='dashed') +
+    labs(x = 'O3 (ppb)', y = 'O3-attributable adult hospitalization rate \n per 100k people', title = 'O3 prevalence vs. \n O3-attributable adult asthma hospitalizations by UHF Neighborhood') + 
+    annotate("label", x = 36, y = 15, label = "Dashed lines \n indicate quartiles",parse = FALSE)
+    # annotate("text", x = 32.50333, y = 10, label  = '', parse = TRUE)
+```
+
+While there is a somewhat positive correlation, we can see that for the middle 50% of O3.ppb values - between about 30 and 32.5 ppb, and even beyond, this correlation is weak, even possibly goes the other way. 
+
+### Check benzene concentrations
+
+```{r}
+#2011 is closest timeframe
+air %>%
+  filter(Name == 'Air Toxics Concentrations- Average Benzene Concentrations') %>%
+  group_by(Time.Period) %>%
+  summarize(n())
+
+benzene.2011 = air %>%
+  filter(Name == 'Air Toxics Concentrations- Average Benzene Concentrations',
+         Time.Period == 2011, Geo.Type.Name == 'UHF42')
+
+#make spdf
+benzene.2011.spdf = merge(uhf.spdf,benzene.2011, by = 'Geo.Join.ID')
+```
+
+```{r}
+#Benzene concentration 2011
+#Also does not look correlated for Bronx
+spplot(benzene.2011.spdf, zcol = 'Data.Value')
+```
+Uncorrelated for Bronx, Rockaways, Staten Island, CH. But aligns with Lower Manhattan hotspot.
+
+### Check fine particulate (PM2.5) distribution
+
+```{r}
+#Various summers and winters over relevant time period
+air %>%
+  filter(Name == 'Fine Particulate Matter (PM2.5)', Geo.Type.Name == 'UHF42') %>%
+  group_by(Time.Period) %>%
+  summarize(n())
+
+#Filter for neighborhood values of pm from Summer 2012 - Beginning of 2015
+#Add season column for summer vs. winter
+pm.1214 = air %>%
+  filter(Name == 'Fine Particulate Matter (PM2.5)', Geo.Type.Name == 'UHF42',
+         Time.Period %in% c('Summer 2012', 'Summer 2013', 'Summer 2014',
+                            'Winter 2012-13', 'Winter 2013-14', 'Winter 2014-15')) %>%
+  mutate(Season = regmatches(Time.Period,regexpr("[A-Za-z]+",Time.Period)))
+
+#Check if values significantly different by season
+pm.1214 %>%
+  select(id = Unique.ID, Geo.Join.ID, Time.Period, avg_mcg_per_cm3 = Data.Value, Season) %>%
+  group_by(Geo.Join.ID, Season) %>%
+  summarize(value = mean(avg_mcg_per_cm3)) %>% 
+  pivot_wider(data = ., names_from = Season, values_from = value) %>% #Looks like higher in winters across areas
+  mutate(win_geq_sum = Winter >= Summer) %>% ungroup %>%
+  summarize(sum(win_geq_sum)/n()) #yes always
+
+#Just look at worst time of year - winter
+pm.1214.winter.avg = pm.1214 %>%
+  select(id = Unique.ID, Geo.Join.ID, Time.Period, avg_mcg_per_cm3 = Data.Value, Season) %>%
+  filter(Season == 'Winter') %>%
+  group_by(Geo.Join.ID) %>%
+  summarize(avg_mcg_per_cm3 = mean(avg_mcg_per_cm3)) 
+```
+
+```{r}
+library(latex2exp)
+ggplot(pm.1214.winter.avg, aes(x = avg_mcg_per_cm3)) +
+  geom_histogram(bins = 18, aes(y = ..density..), fill = 'orange') +
+  geom_density() +
+  labs(x = TeX('Average PM2.5 Density in Winters 2012-2014 ($mcg/cm^3$)'),
+       y = 'Density', title = 'Distribution of fine particulate density \n Across UHF Neighborhoods')
+```
+Uneven distribution, should look geographically
+
+```{r}
+pm.1214.winter.avg.spdf = merge(uhf.spdf, pm.1214.winter.avg, by = 'Geo.Join.ID')
+```
+
+```{r}
+spplot(pm.1214.winter.avg.spdf, zcol = 'avg_mcg_per_cm3')
+```
+
+Again seems uncorrelated with asthma. Should look just within boilers, as may have to do with particles within home.
+
+```{r}
+#Only has 2013 and 2015. Average these for each UHF Neighborhood.
+boiler.pm.1315.avg = air %>%
+  filter(Name == 'Boiler Emissions- Total PM2.5 Emissions',Geo.Type.Name == 'UHF42') %>%
+  group_by(Geo.Join.ID) %>%
+  summarize(n_per_km2 = mean(Data.Value))
+
+boiler.pm.1315.avg.spdf = merge(uhf.spdf, boiler.pm.1315.avg, by = 'Geo.Join.ID')
+
+spplot(boiler.pm.1315.avg.spdf, zcol = 'n_per_km2')
+```
+Again uncorrelated for CH, Bronx, SI, Rockaways. But aligns somewhat with Lower Manhattan hotspot.
+
+Overall: O3 related asthma hospitalizations align with those from the Medicare data. However, there are no universal correlates of air quality with asthma rates, not even O3 readings. The only alignments between 'hotspots' and air quality measures are:
+
+-   High O3 in Rockaways
+-   High benzene, fine particulate matter in Lower Manhattan. 
+
+## Zoning and asthma
+
+### Code zoning data
+
+Zoning data has no common identifiers. Will have to use some sort of geographic intersections.
+Relevant zone types:
+-   C8: Typical uses are automobile showrooms and repair shops, warehouses, gas stations and car washes - although all commercial uses as well as certain community facilities are permitted in C8 districts. Housing is not permitted and performance standards are imposed for certain semi-industrial uses
+
+-   M1: often a buffer between M2 or M3 districts and adjacent residential or commercial districts. Light industries typically found in M1 areas include woodworking shops, auto storage and repair shops, and wholesale service and storage facilities. In theory, nearly all industrial uses can locate in M1 areas if they meet the more stringent M1 performance standards. 
+
+
+-   M2: occupy the middle ground between light and heavy industrial areas
+
+-   M3: heavy industries that generate noise, traffic, or pollutants. Typical uses include power plants, solid waste transfer facilities and recycling plants, and fuel supply depots
+
+```{r}
+#Subset 'M' manufacturing/industrial zones
+indzd.spdf = nyzd.spdf[grepl('M',nyzd.spdf$ZONEDIST),]
 ```
 
 
+Stack the plots
 
+```{r}
+#Fortify
+asthma.rate.byzip2014.fort = make.fort(asthma.rate.byzip2014.spdf)
+indzd.fort = make.fort(indzd.spdf)
+asthma.greater.fort = make.fort(asthma.greater.spdf)
+```
 
+```{r}
+ggplot() +
+  geom_polygon(data = asthma.rate.byzip2014.fort, aes(x = long, y = lat, group = group, fill = asthma_rate)) +
+  geom_path(data = asthma.rate.byzip2014.fort, aes(x = long, y = lat, group = group), color = "white", size = 0.2) +
+  scale_fill_continuous(type = "viridis") +
+  
+  geom_polygon(data = indzd.fort, aes(x = long, y = lat, group = group), fill = 'purple', alpha = 0.2) +
+  geom_path(data = indzd.fort, aes(x = long, y = lat, group = group), linetype = 'dashed', color = 'purple', size = 0.2) +
+  
+  coord_equal() +
+  theme(panel.background=element_blank())+
+  theme(panel.background= element_rect(color="black")) +
+  theme(axis.title = element_blank()) +
+  annotate("label", x = -74.14, y = 40.85, label = 'Highlighted regions indicate \n industrial zones') +
+  labs(title = "Industrial zones vs. Asthma rate")
+```
+
+Against significant areas
+
+```{r}
+ggplot() +
+  geom_polygon(data = asthma.greater.fort, aes(x = long, y = lat, group = group, fill = !sign_greater)) +
+  geom_path(data = asthma.greater.fort, aes(x = long, y = lat, group = group), 
+            color = "white", size = 0.2) +
+  scale_fill_manual(labels = c("True", "False"), values = c("#EA4969", "#56BFFB")) + 
+  
+  geom_polygon(data = indzd.fort, aes(x = long, y = lat, group = group), 
+               fill = 'purple', alpha = 0.5) +
+  geom_path(data = indzd.fort, aes(x = long, y = lat, group = group), linetype = 'dashed', color = 'purple', size = 0.1) +
+  
+  coord_equal() +
+  theme(panel.background=element_blank())+
+  theme(panel.background= element_rect(color="black")) +
+  theme(axis.title = element_blank()) +
+  annotate("label", x = -74.14, y = 40.85, label = 'Highlighted regions indicate \n industrial zones') +
+  labs(title = "Industrial zones vs. Asthma rate", fill = 'Asthma Rates \n significantly higher\n than city average')
+```
+It looks like Mott Haven and Staten Island hotspots are both industrial zones. There are two of the only large industrial areas overlapping with residential areas. However, a thorough investigation would involve coding geometry and multivariate calculus problems, which go outside the scope of this investigation.
+
+However, this does not seem to be the factor involved in CH region.
+
+```{r}
+
+```
 
