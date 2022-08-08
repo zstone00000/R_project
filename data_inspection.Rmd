@@ -421,3 +421,46 @@ tobac %>%
 ```
 
 
+# Income
+
+```{r}
+income_data = read.csv('data/census_income.csv')
+income = income_data
+names(income) = c(income[1,])
+income = income[-1,]
+```
+
+
+```{r, warning=FALSE}
+source('census_import.R')
+income = income %>%
+  mutate(id = gsub(pattern = '1400000US', replacement = '', x = id)) %>%
+  census_num(omit_cols = 'Geographic Area Name') %>%
+  rename(GeoID = id)
+```
+
+```{r}
+header
+```
+
+```{r}
+income2020 = census2020 %>%
+  transmute(GeoID, population = Pop_20, housed_pop = HHPop_20, 
+            households = HHPop_20/AvHHSz_20) %>%
+  inner_join(income %>% select(GeoID, contains('!!Households!!Mean')),
+             by = 'GeoID') %>%
+  select(-6)
+
+names(income2020) = c('GeoID', 'population', 'housed_pop', 'households', 'mean_HH_income')
+```
+
+```{r}
+income2020 %>%
+  transmute(GeoID, housed_pop, households, mean_HH_income, net_HH_income = households * mean_HH_income)
+```
+
+```{r}
+
+```
+
+
