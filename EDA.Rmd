@@ -11,7 +11,7 @@ output: html_document
 knitr::opts_knit$set(root.dir = '/Users/zachstone/Documents/coursework/NYCDSA/R_project')
 ```
 
-```{r}
+```{r, warning=FALSE}
 library(tidyr)
 library(dplyr)
 library(ggplot2)
@@ -44,7 +44,6 @@ census_ch = census_list[['_Ch']]
 ```
 
 
-
 ## Make zip table and attach to census
 
 ```{r}
@@ -56,6 +55,12 @@ zip_table = make_ziptable('data/TRACT_ZIP_122020.xlsx')
 census2020 = census2020 %>%
   left_join(zip_table, by = c("GeoID" = "tract")) %>%
   select(c(1:4,ncol(census2020)+1,5:ncol(census2020))) 
+```
+
+```{r}
+census2010 = census2010 %>%
+  left_join(zip_table, by = c("GeoID" = "tract")) %>%
+  select(c(1:4,ncol(census2010)+1,5:ncol(census2010))) 
 ```
 
 ```{r}
@@ -113,6 +118,14 @@ tobac = tobac_data
 #Contains data for 19 different measures
 air_data = read.csv('data/Air_Quality.csv')
 air = air_data
+```
+
+## Import rat data
+
+```{r}
+source('rat_data.R')
+rat_data = import_ratdata('data/rat_data2012-2014.json')
+rat = rat_data
 ```
 
 # EDA
@@ -716,7 +729,118 @@ It looks like Mott Haven and Staten Island hotspots are both industrial zones. T
 
 However, this does not seem to be the factor involved in CH region.
 
-```{r}
+## Rat data
 
+```{r}
+#Initial and compliance only have 3 types of results, with one indicating rat activity
+rat %>%
+  filter(inspection_type == 'Initial') %>%
+  group_by(result) %>%
+  summarize(n())
+
+rat %>%
+  filter(inspection_type == 'Compliance') %>%
+  group_by(result) %>%
+  summarize(n())
 ```
+
+```{r}
+#Get failed initial inspection rate by zip
+rat_result = function(x) {switch(x, 'Passed' = 'pass', 'Rat Activity' = 'rats', 'Failed for Other R' = 'other_fail')}
+
+rat.initial.zip = rat %>%
+  filter(inspection_type == 'Initial') %>%
+  rename(zip = zip_code) %>%
+  group_by(zip, result) %>%
+  summarize(counts = n()) %>%
+  mutate(result = sapply(result, rat_result)) %>%
+  pivot_wider(names_from = result, values_from = counts) %>%
+  mutate(pass = ifelse(is.na(pass), 0, pass), 
+         rats = ifelse(is.na(rats), 0, pass), 
+         other_fail = ifelse(is.na(other_fail), 0, pass)) %>%
+  mutate(total_inspections = sum(pass,rats,other_fail)) %>%
+  mutate(prop_rats = ifelse(total_inspections != 0, rats/total_inspections, 0))
+```
+
+```{r}
+rat.initial.zip.spdf = merge(zip.spdf, rat.initial.zip, by = 'zip')
+```
+
+```{r}
+# spplot(rat.initial.zip.spdf, zcol = 'prop_rats')
+```
+
+```{r}
+rat.initial.zip.fort = make.fort(rat.initial.zip.spdf)
+```
+
+```{r}
+ggplot(data = rat.initial.zip.fort, aes(x = long, y = lat, group = group, fill = prop_rats)) + 
+  geom_polygon() + 
+  scale_fill_continuous(type = "viridis") +
+  
+  geom_path(data = rat.initial.zip.fort, aes(x = long, y = lat, group = group), 
+            color = "white", size = 0.2) +
+  
+  coord_equal() +
+  theme(panel.background=element_blank())+
+  theme(panel.background= element_rect(color="black")) +
+  theme(axis.title = element_blank()) +
+  labs(fill = "Proportion", title = 'Proportion of inspections \n observing rat activity')
+```
+
+Yes, looks like higher in both CH region, Bronx (though not Mott Haven), and the Staten Island hotspots
+
+```{r}
+rat.compliance.zip = rat %>%
+  filter(inspection_type == 'Compliance') %>%
+  rename(zip = zip_code) %>%
+  group_by(zip, result) %>%
+  summarize(counts = n()) %>%
+  filter(zip != 0) %>%
+  mutate(result = sapply(result, rat_result)) %>%
+  pivot_wider(names_from = result, values_from = counts) %>%
+  mutate(pass = ifelse(is.na(pass), 0, pass),
+         rats = ifelse(is.na(rats), 0, pass),
+         other_fail = ifelse(is.na(other_fail), 0, pass)) %>%
+  mutate(total_inspections = sum(pass,rats,other_fail)) %>%
+  mutate(prop_rats = ifelse(total_inspections != 0, rats/total_inspections, 0))
+```
+
+```{r}
+rat.compliance.zip.spdf = merge(zip.spdf, rat.compliance.zip, by = 'zip')
+```
+
+```{r}
+#Compliance is similar but some areas drop out. Using initial to indicate "pre-city request" condition
+# spplot(rat.compliance.zip.spdf, zcol = 'prop_rats')
+```
+
+Indicates somewhat that asthma triggers related to sanitation may be more indicative than air quality alone in NYC. However, limited locational rat data, so unlikely to get strong results.
+
+```{r}
+#too limited data, nonsense
+# rat.initial.zip %>%
+#   select(zip, prop_rats) %>%
+#   mutate(zip = as.numeric(zip)) %>%
+#   inner_join(asthma.zip.rates, by = 'zip') %>%
+#   ggplot(data = ., aes(x = prop_rats, y = asthma_rate)) +
+#     geom_point()
+```
+
+## XXX Do survey data here for correlation between vermin/sanitation issues and asthma
+
+# SES and asthma
+
+
+
+```{r}
+income
+```
+
+## Geographic analysis
+
+## Survey analysis
+
+
 

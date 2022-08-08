@@ -81,18 +81,18 @@ parse_census2020 <- function(censuspath) {
   
 }
 
-# ## Example workflow
-# path = 'data/nyc_decennialcensusdata_2010_2020_change.xlsx'
-# # xl_ = import_census2020(path)
-# # censusdf_ = subsetCensus(xl_)
-# # censusdf_ = parseGeoID(censusdf_)
-# # censusdf_ = census_num(censusdf_, omit_cols = c('GeoType', 'Borough'))
-# # census_list_ = split_census(censusdf_)
-# # census_list_
-# 
-# 
-# output = parse_census2020(path)
-# output['_20']
+import_income <- function(filepath) {
+  income = read.csv(filepath)
+  names(income) = c(income[1,])
+  income = income[-1,]
+  
+  income = income %>%
+    mutate(id = gsub(pattern = '1400000US', replacement = '', x = id)) %>%
+    census_num(omit_cols = 'Geographic Area Name') %>%
+    rename(GeoID = id)
+  
+  return(income)
+}
 
 
 
