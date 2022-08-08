@@ -135,7 +135,7 @@ air = air_data
 
 ```{r}
 source('rat_data.R')
-rat_data = import_ratdata('data/rat_data2012-2014.json')
+rat_data = import_ratdata('data/rat_data2009-2014.json')
 rat = rat_data
 ```
 
@@ -198,7 +198,7 @@ theme(panel.background=element_blank())+
 theme(panel.background= element_rect(color="black")) +
 scale_fill_continuous(type = "viridis") +
 theme(axis.title = element_blank(), axis.text = element_blank()) +
-labs(title = "Rate of Medicare/Medicaid Benficiaries with Asthma by Zip")
+labs(title = "Rate of Medicare/Medicaid Benficiaries with Asthma by Zip (in (2014)")
 print(p0)
 
 # ggsave(plot = p0, 'asthmarate_byzip.png', device = 'png', dpi = 320, scale = 2)
@@ -313,7 +313,7 @@ theme(panel.background=element_blank())+
 theme(panel.background= element_rect(color="black")) +
 theme(axis.title = element_blank(), axis.text = element_blank()) +
 labs(title = "Areas with significantly higher asthma rate than citywide average",
-     fill = 'Asthma Rates \n significantly higher\n than city average')
+     fill = 'Asthma Rates \n significantly higher\n than city average (2014)')
 print(p1)
 ```
 
@@ -447,7 +447,7 @@ theme(panel.background=element_blank())+
 theme(panel.background= element_rect(color="black")) +
 theme(axis.title = element_blank(), axis.text = element_blank()) +
 scale_fill_continuous(type = "viridis") +
-labs(title = "Tobacco Stores Per Capita by Zip")
+labs(title = "Tobacco Stores Per Capita by Zip (current)")
 print(p2)
 ```
 
@@ -550,7 +550,7 @@ theme(panel.background=element_blank())+
 theme(panel.background= element_rect(color="black")) +
 theme(axis.title = element_blank(), axis.text = element_blank()) +
 scale_fill_continuous(type = "viridis") +
-labs(title = "O3-attributable asthma visits (adult)", fill = 'Hospital visits per 100k')
+labs(title = "Average O3-attributable asthma visits 2012-2014 (adult)", fill = 'Hospital visits per 100k')
 ```
 
 ### Look into O3 air quality
@@ -590,7 +590,7 @@ theme(panel.background=element_blank())+
 theme(panel.background= element_rect(color="black")) +
 theme(axis.title = element_blank(), axis.text = element_blank()) +
 scale_fill_continuous(type = "viridis") +
-labs(title = "O3 across NYC", fill = 'O3 concentration (ppb)')
+labs(title = "O3 across NYC (2012-2014)", fill = 'O3 concentration (ppb)')
 ```
 
 We can see some elevated regions, but not clear if significantly different or correlated to hospitalization rates, even O3 attributable ones. Of the major hotspots: mildly higher in Bronx, Very High for Rockaways, actually lower for Staten Island and Lower Manhattan, and average for CH/Ridgewood.
@@ -691,7 +691,7 @@ ggplot(pm.1214.winter.avg, aes(x = avg_mcg_per_cm3)) +
   geom_histogram(bins = 18, aes(y = ..density..), fill = 'orange') +
   geom_density() +
   labs(x = TeX('Average PM2.5 Density in Winters 2012-2014 ($mcg/cm^3$)'),
-       y = 'Density', title = 'Distribution of fine particulate density \n Across UHF Neighborhoods')
+       y = 'Density', title = 'Distribution of fine particulate density \n Across UHF Neighborhoods (Average over winters 2012-2014)')
 ```
 Uneven distribution, should look geographically
 
@@ -712,7 +712,7 @@ theme(panel.background=element_blank())+
 theme(panel.background= element_rect(color="black")) +
 theme(axis.title = element_blank(), axis.text = element_blank()) +
 scale_fill_continuous(type = "viridis") +
-labs(title = "PM2.5 concentration across NYC", fill = 'Average PM2.5 \n concentration (mcg/cm3)')
+labs(title = "PM2.5 concentration across NYC (Average over winters 2012-2014)", fill = 'Average PM2.5 \n concentration (mcg/cm3)')
 ```
 
 Again seems uncorrelated with asthma. Should look just within boilers, as may have to do with particles within home.
@@ -865,7 +865,7 @@ ggplot(data = rat.initial.zip.fort, aes(x = long, y = lat, group = group, fill =
   theme(panel.background=element_blank())+
   theme(panel.background= element_rect(color="black")) +
   theme(axis.title = element_blank()) +
-  labs(fill = "Proportion", title = 'Proportion of inspections \n observing rat activity 2012-2014')
+  labs(fill = "Proportion", title = 'Proportion of inspections \n observing rat activity 2009-2014')
 ```
 
 Yes, looks like higher in both CH region, Bronx (though not Mott Haven), and the Staten Island hotspots
